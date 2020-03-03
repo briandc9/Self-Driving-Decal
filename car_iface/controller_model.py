@@ -1,5 +1,4 @@
 import os
-from utils import nn
 
 class Car_Interface():
     '''
@@ -13,6 +12,8 @@ class Car_Interface():
             raise Exception(f"Illegal argument model can only be 'simple' or 'complex' not {model}")
 
         self.model = model
+        if (self.model == "complex"):
+            import sysid.nn as nn
 
         #Variables to keep track of the car's current state
         self.position = 0
@@ -38,12 +39,11 @@ class Car_Interface():
         All except for the brake_weight should be positive.
         '''
         #Coefficients corresponding to the motion dynamics
-        self.rolling_bias = None
-        self.friction_constant = None
+        self.rolling_bias = 0.00996110270890918
+        self.friction_constant = -0.10985362367745387
 
-        self.accelerator_weight = None
-        self.brake_weight = None
-        raise Exception("You forgot to input SystemID learned weights in the Controller Model")
+        self.accelerator_weight = 0.09999911339865257
+        self.brake_weight = -0.24995845277027817
 
         '''
         If approximating the complex internal model we use a FCN
@@ -53,7 +53,7 @@ class Car_Interface():
         The model has 3 inputs (accelerator depression, brake depression, velocity)
         '''
         if (self.model == "complex"):
-            self.complex_accel_fcn = nn.fcn(model_name = self.complex_weights_fp(), num_inputs = 3)
+            self.complex_accel_fcn = nn.fcn(model_name = os.path.join(self.sys_id_fp(), "complex_accel"), num_inputs = 3)
 
         #Variables to keep track of time (seconds)
         self.T = 0
@@ -89,7 +89,7 @@ class Car_Interface():
         neural network that models accelration as a function of the same inputs
         as before.
         '''
-        if (self.model == "simple"):
+        if self.model == "simple":
 
             '''
             PART OF WEEK 2 HW
@@ -112,11 +112,20 @@ class Car_Interface():
 
             self.accel should be set to the sum of these components.
             '''
+            if pedal is None:
+                accel_amt = 0
+                brake_amt = 0
+            elif pedal is self.ACCELERATOR:
+                accel_amt = amount
+                brake_amt = 0
+            else:
+                accel_amt = 0
+                brake_amt = amount
+            self.accel = (self.accelerator_weight * accel_amt) + (self.brake_weight * brake_amt) + (self.friction_constant * abs(self.velocity) + self.rolling_bias)
+             
+                    
 
-            #CODE HERE (Delete exception too)
-            raise Exception("You forgot to fill Simple Acceleration Calcs in the Controller Model")
-
-        elif (self.model == "complex"):
+        elif self.model == "complex":
             '''
             PART OF WEEK 3 HW
 
@@ -137,8 +146,17 @@ class Car_Interface():
             '''
             model_inp = [0, 0, 0]
 
-            #CODE HERE (Delete exception too)
-            raise Exception("You forgot to fill Complex Input Formulation in the Controller Model")
+            if pedal is None:
+                accel_amt = 0
+                brake_amt = 0
+            elif pedal is self.ACCELERATOR:
+                accel_amt = amount
+                brake_amt = 0
+            else:
+                accel_amt = 0
+                brake_amt = amount
+                
+            model_inp = [accel_amt, brake_amt, vel]
 
             self.accel = self.complex_accel_fcn.predict([model_inp])
 
@@ -153,10 +171,10 @@ class Car_Interface():
         If the velocity is 0 make sure the car cannot accelerate backwards.
         This is to prevent moving backwards when braking in a stationary position.
         '''
-        if (self.velocity == 0):
-            if (self.gear == self.FORWARD):
+        if self.velocity == 0:
+            if self.gear == self.FORWARD:
                 self.accel = max(self.accel, 0)
-            elif (self.gear == self.REVERSE):
+            elif self.gear == self.REVERSE:
                 self.accel = min(self.accel, 0)
 
         '''
@@ -168,18 +186,13 @@ class Car_Interface():
         HINT: position update should have a linear term in velocity, and a quadratic
               term in acceleration.
         '''
-        '''
-        UNCOMMENT AND FILL IN (Delete exception too)
-
-        self.position +=
-        self.velocity +=
-        '''
-        raise Exception("You forgot to fill in pos/vel dynamics in the Controller Model")
+        self.position += (self.velocity * self.dt) + (0.5 * self.accel * (self.dt ** 2))
+        self.velocity += (self.accel * self.dt)
 
         #These ensure that the velocity is never against the current gear setting.
-        if (self.gear == self.FORWARD):
+        if self.gear == self.FORWARD:
             self.velocity = max(self.velocity, 0)
-        elif (self.gear == self.REVERSE):
+        elif self.gear == self.REVERSE:
             self.velocity = min(self.velocity, 0)
 
         #Increment the internal time
@@ -208,11 +221,11 @@ class Car_Interface():
     def steer_to(self, ang):
         self.steering_angle = max(-1, min(ang, 1))
 
-    '''
-    Crawls the working directory up to the top most folder for which
-    car_iface should be a child directory.  Adds the name of the file
-    to get the learned weights for the complex model.
-    '''
-    def complex_weights_fp(self):
+    def sys_id_fp(self):
+        import settings
+
         cur_dir = os.path.dirname(__file__)
-        return os.join(cur_fp, "complex_accel")
+        internal_path = os.path.join(cur_dir, '../../internal_only/sysid/')
+        if settings.use_internal_if_available and os.path.exists(internal_path):
+            return internal_path
+        return os.path.join(os.path.dirname(__file__), '../sysid/')
